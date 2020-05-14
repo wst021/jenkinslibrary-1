@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${Service}
+  namespace: ${NS}
+  labels:
+        app: ${Service}
+        release: ${release}
+spec:
+  replicas: ${server_replicas}
+  selector:
+    matchLabels:
+      app: ${Service}
+      release: ${release}
+  template:
+    metadata:
+      labels:
+        app: ${Service}
+        release: ${release}
+    spec:
+      hostAliases:
+      - ip: ${RC_Host1}
+        hostnames:
+        - ${RC_HostName1}
+      - ip: ${RC_Host2}
+        hostnames:
+        - ${RC_HostName2}
+      - ip: ${RC_Host3}
+        hostnames:
+        - ${RC_HostName3}
+      - ip: "${DnsIP}"
+        hostnames:
+        - "${DnsName}"
+      containers:
+      - name: ${Service}
+        image: ${REPOSITORY}
+        resources:
+         requests:
+          memory: "${request_mem}"
+         limits:
+          memory: "${limit_mem}"
+        ports:
+        - name: http
+          containerPort: ${Port}
+      imagePullSecrets:
+      - name: registry-secret

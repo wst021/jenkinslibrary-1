@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${Service}
+  namespace: ${NS}
+  labels:
+        app: ${Service}
+        release: ${release}
+spec:
+  replicas: ${server_replicas}
+  selector:
+    matchLabels:
+      app: ${Service}
+      release: ${release}
+  template:
+    metadata:
+      labels:
+        app: ${Service}
+        release: ${release}
+    spec:
+      containers:
+      - name: ${Service}
+        image: ${REPOSITORY}
+        resources:
+         requests:
+          memory: ${request_mem}
+         limits:
+          memory: ${limit_mem}
+        ports:
+        - name: http
+          containerPort: ${Port}
+        volumeMounts:
+        - mountPath: ${mountPath}
+          name: ${Service}
+      volumes:
+      - name: ${Service}
+        persistentVolumeClaim:
+          claimName: ${pvcClaim}
+      imagePullSecrets:
+      - name: registry-secret

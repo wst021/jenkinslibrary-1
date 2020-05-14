@@ -1,0 +1,68 @@
+#!groovy
+@Library("jenkinslibrary") _    //jenkins: Manage Jenkins -> configure system -> Global Pipeline Libraries -> Library Name
+
+// libraries -> func
+
+
+// environment -> parameters
+String Service = "${env.Service}"
+String releaseEnv = "${env.releaseEnv}"
+def remote = [:]
+
+// config file
+def baseEnvConfig = libraryResource "com/ehome2/${releaseEnv}/conf/base.groovy"
+def serviceEnvConfig = libraryResource "com/ehome2/${releaseEnv}/conf/${Service}.groovy"
+
+
+//pipeline
+pipeline{
+    agent any
+    options {
+    timestamps() //日志会有时间
+    skipDefaultCheckout() //删除隐式checkout scm语句
+    disableConcurrentBuilds() //禁止并行
+    timeout(time: 1, unit: "HOURS") //流水线超时设置1h
+	}
+    stages{
+		stage("initial env"){  // initial env parmaters to global pipeline
+			steps{
+				script{
+					sh "echo \'${baseEnvConfig}\' > base.groovy" 
+					load 'base.groovy'
+					sh "echo \'${serviceEnvConfig}\' > service.groovy" 
+					load 'service.groovy'
+					//choice resources file 
+					remote.name = targetAddr
+					remote.host = targetAddr
+
+				}
+			}
+		}
+        stage("pull code"){  // pull code from gitlab 
+            steps{
+				script{
+				checkout([$class: 'GitSCM', 
+					branches: [[name: "${gitlab_branch}"]], 
+					doGenerateSubmoduleConfigurations: false, 
+					extensions: [], submoduleCfg: [], 
+					userRemoteConfigs: [[credentialsId: "${gitlab_auth}", 
+					url: "${gitlab_url}" ]]])
+				}
+           }
+        } 
+		stage("replace files"){  //  deploy project to k8s server
+		    steps{
+		    	script{
+					withCredentials([sshUserPrivateKey(credentialsId: credentialsId, keyFileVariable: 'identity', passphraseVariable: '', usernameVariable: 'userName')]) {
+						remote.user = userName
+						remote.identityFile = identity
+						sshCommand remote: remote, command: "[[ -d ${nfsDir} ]] && rm -rf ${nfsDir}/* || mkdir -p ${nfsDir}/"
+						sshPut remote: remote, "${WORKSPACE}/data", into: "${nfsDir}/"
+						sshPut remote: remote, "${WORKSPACE}/load_data", into: "${nfsDir}/"
+						sshCommand remote: remote, command: "chmod -R 755 ${nfsDir}/"
+					}
+		        }
+		    }
+		} 		
+    }
+}

@@ -1,0 +1,63 @@
+#!groovy
+@Library("jenkinslibrary") _    //jenkins: Manage Jenkins -> configure system -> Global Pipeline Libraries -> Library Name
+
+
+// libraries -> func
+def healthCheck = new org.devops.healthCheck()
+def harborSearch = new org.devops.harborSearch()
+def k8sSearch = new org.devops.k8sSearch()
+
+// environment -> parameters
+String Service = "${env.Service}"
+String releaseEnv = "${env.releaseEnv}"
+
+
+// config file
+
+def remote = [:]	
+
+//pipeline
+pipeline{
+    agent any
+    options {
+    timestamps() //鏃ュ織浼氭湁鏃堕棿
+    skipDefaultCheckout() //鍒犻櫎闅愬紡checkout scm璇彞
+    disableConcurrentBuilds() //绂佹骞惰
+    timeout(time: 1, unit: "HOURS") //娴佹按绾胯秴鏃惰缃�1h
+	}
+    stages{
+    	stage("init"){
+    	    steps{
+    	    	script{
+    	    	    remote.name = 'harbor01'
+					remote.host = '172.24.101.218'
+					remote.allowAnyHosts = true
+					remote.fileTransfer = "scp"
+
+    	    	}
+
+    	    }
+
+    	}
+
+		stage("test"){
+			steps{
+				script{
+					withCredentials([sshUserPrivateKey(credentialsId: "902238e5-1b2b-448e-91ea-c5fbe86c82d9", keyFileVariable: 'identity', passphraseVariable: '', usernameVariable: 'userName')]) {
+						remote.user = userName
+						remote.identityFile = identity
+						sshPut remote: remote,from: "/root/yef/test/", into: "/root/yef/haha" 
+						
+					}
+					script{
+					
+
+
+
+
+					}
+				}
+		    }
+		}	
+    }
+}

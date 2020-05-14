@@ -1,0 +1,18 @@
+env.gitlab_url = "http://172.24.112.158/root/airportehome.git"
+env.gitlab_branch = "*/uat"
+env.server_replicas = "1"
+env.Port = "32323"
+env.Appid = "1000013"
+env.target_dir = "${WORKSPACE}/urm-parent/urm-module/urm-3rd/urm-analysisCalculation"
+env.apm_server = "http://172.24.114.91:8200"
+env.request_mem = "1Gi"
+env.limit_mem = "3Gi"
+env.java_Xms = "2g"
+env.java_Xmx = "2g"
+env.java_Xmn = "1g"
+env.MemConf = "-Xms${env.java_Xms} -Xmx${env.java_Xmx} -Xmn${env.java_Xmn}"
+env.JAVA_OPTS="-server ${env.MemConf} -XX:SurvivorRatio=8 -XX:MetaspaceSize=256m -XX:MaxMetaspaceSize=512m -XX:+UseParallelGC -XX:ParallelGCThreads=4 -XX:+UseParallelOldGC -XX:+UseAdaptiveSizePolicy -XX:+PrintGCDetails -XX:+PrintTenuringDistribution -XX:+PrintGCTimeStamps -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/ -Xloggc:/gc.log -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=5 -XX:GCLogFileSize=10M"
+
+env.APM_OPTS="-javaagent:/opt/elastic-apm-agent-1.12.0.jar -Delastic.apm.service_name=${Service} -Delastic.apm.server_url=${env.apm_server} -Delastic.apm.application_packages=org.example"
+
+env.dockerFile_start="java ${env.APM_OPTS} ${env.JAVA_OPTS} -Denv=${env.release} -Dapp.id=${env.Appid} -Dapollo.configService=${env.Apollo} -Dserver.port=${env.Port} -Djava.security.egd=file:/dev/./urandom -jar /opt/${Service}.jar"

@@ -1,0 +1,140 @@
+#!groovy
+@Library("jenkinslibrary") _    //jenkins: Manage Jenkins -> configure system -> Global Pipeline Libraries -> Library Name
+
+
+// libraries -> func
+def healthCheck = new org.devops.healthCheck()
+def k8sSearch = new org.devops.k8sSearch()
+def tools = new org.devops.tools()
+// environment -> parameters
+String Service = "${env.Service}"
+String releaseEnv = "${env.releaseEnv}"
+def remote = [:]
+
+// config file
+def baseEnvConfig = libraryResource "com/ehome2/${releaseEnv}/conf/base.groovy"
+def serviceEnvConfig = libraryResource "com/ehome2/${releaseEnv}/conf/${Service}.groovy"
+
+
+//pipeline
+pipeline{
+    agent any
+    options {
+    timestamps() //日志会有时间
+    skipDefaultCheckout() //删除隐式checkout scm语句
+    disableConcurrentBuilds() //禁止并行
+    timeout(time: 1, unit: "HOURS") //流水线超时设置1h
+	}
+    stages{
+		stage("initial env"){  // initial env parmaters to global pipeline
+			steps{
+				script{
+					dir("${WORKSPACE}/") {
+						sh "echo \'${baseEnvConfig}\' > base.groovy" 
+						load 'base.groovy'
+						sh "echo \'${serviceEnvConfig}\' > service.groovy" 
+						load 'service.groovy'
+					 	env.deploymentYamlFile = libraryResource "com/ehome2/${releaseEnv}/yaml/deployment-${Service}.yaml"
+						env.serviceYamlFile = libraryResource "com/ehome2/${releaseEnv}/yaml/service-${Service}.yaml"
+					}	
+					remote.name = remoteAddr
+					remote.host = remoteAddr
+					remote.allowAnyHosts = true
+				}	
+			}
+		}
+		stage("update model data"){
+		   when { 
+        		beforeAgent true;
+        		environment name: 'status', value: 'update'
+        	}
+		    steps{
+		    	script{
+		    		//传输文件到目的路径
+		    		sh "[[ -d ${targetPath} ]] || mkdir -p ${targetPath}"
+		    		sh "[[ -f ${targetPath}/${sourceName} ]] && rm -f ${targetPath}/${sourceName}"
+		    		
+					sh "cp -r ${WORKSPACE}/data ${nfsDir}/"
+					sh "cp -r ${WORKSPACE}/load_data ${nfsDir}/"
+					sh "chmod -R 755 ${nfsDir}"
+					withCredentials([sshUserPrivateKey(credentialsId: credentialsId, keyFileVariable: 'identity', passphraseVariable: '', usernameVariable: 'userName')]) {
+						remote.user = userName
+						remote.identityFile = identity
+						//sshCommand remote: remote, command: "ls /root"
+						sshGet remote: remote, from: "${sourcePath}/${sourceName}", into: "${targetPath}/", override: true
+					}
+					//删除以前解压的tar包
+					sh "[[ -d ${targetPath}/${untarName} ]] && rm -rf ${targetPath}/${untarName}"
+					//解压tar包
+					sh "tar xf ${targetPath}/${sourceName} -C ${targetPath}/"
+					//删除tar包
+					sh "[[ -f ${targetPath}/${sourceName} ]] && rm -rf ${targetPath}/${sourceName}"
+					//删除以前备份目录
+					def removefiles = sh returnStdout: true, script: "ls  ${targetPath}/${sourceName}-*"
+					removefiles && removefiles.trim().tokenize().each{sh "rm -rf ${targetPath}/${it}"}
+					//备份现有文件
+					sh "[[ -d ${targetPath}/${targetName} ]] && touch ${targetPath}/${targetName} && mv ${targetPath}/${targetName} ${targetPath}/${targetName}-${Tag}"
+					//更新文件
+					sh "[[ -d ${targetPath}/${untarName} ]] && mv ${targetPath}/${untarName} ${targetPath}/${targetName}"
+		    	}
+		    }
+		}
+		stage("rollback model data"){
+		   when { 
+        		beforeAgent true;
+        		environment name: 'status', value: 'rollback'
+        	}
+		    steps{
+		    	script{
+		    		//检测env回退包参数
+					if(env.backDirName){
+					    //检测备份文件是否存在,如果存在，删除现有data文件 
+						sh script:"[[ -d ${targetPath}/${backDirName} ]] && rm -rf ${targetPath}/${targetName}"
+						sh script:"mv ${targetPath}/${backDirName} ${targetPath}/{targetName}"
+					}else{
+						// 获取备份目录
+					    def backupfiles = sh(returnStdout: true, script: "ls -tr ${targetPath}/${targetName}-*").trim()
+					    // 目录校验
+					    backupfiles || error("can not found rollback file")
+					    // 拼接目录地址
+					    backupfile = "${targetPath}/" + backupfiles.tokenize()[-1]
+					    
+					    //校验备份目录是否存在
+					    status = sh returnStatus:true, script:"[[ -d ${backupfile} ]]"
+						if(status != 0) error "${backupfile} is not found" 
+						// 删除现有目录
+						sh script:"[[ -d ${targetPath}/${targetName} ]] && rm -rf ${targetPath}/${targetName}" 
+						//回滚
+						sh "mv ${backupfile} ${targetPath}/${targetName}"
+					}
+		    	}
+		    }
+		}
+		stage("deploy common service"){  //  deploy project to k8s server
+		    steps{
+		    	script{
+			    	dir("${WORKSPACE}/") {
+			    	sh "echo \"${deploymentYamlFile}\" > deployment.yaml"
+			    	sh "echo \"${serviceYamlFile}\" > service.yaml"
+			    	deploymentStatus = k8sSearch.deploymentSearch(Service,NS)
+			    	if(deploymentStatus){
+			    	    tools.PrintMes( "delete deployment/${Service} first","blue")
+			    	    sh "kubectl -n ${NS} delete deployment/${Service}"
+			    	 }
+		    	    tools.PrintMes( "create deployment ${Service}","blue")
+		    	    sh "kubectl apply -f deployment.yaml --record"
+		    	    healthCheck.checkPodStatus(Service,NS)
+			    	svcStatus = k8sSearch.serviceSearch(Service,NS)
+		    	    if(svcStatus){
+		    	        tools.PrintMes( "delete svc/${Service} first","blue")
+		    	        sh "kubectl -n ${NS} delete svc/${Service}"  
+		    	    }
+	    	        tools.PrintMes("create svc/${Service}","blue")
+	    	        sh "kubectl apply -f service.yaml --record"
+	    	        healthCheck.checkSvcStatus(Service,NS,[ httpNodePort,tcpNodePort ])
+			    	}					   
+		    	}
+			}
+		}
+    }
+}
